@@ -1,10 +1,25 @@
 [project]
-name = "surp"
+name = "quantum-surp"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.13"
+description = "SUNY Poly SURP 2026 - Quantum Neuron vs Classical Neuron"
+requires-python = ">=3.11"
+
 dependencies = [
-    "qiskit>=2.4.1",
-    "torch>=2.12.0",
+    "qiskit>=1.0",
+    "qiskit-aer>=0.14",          # local simulator
+    "qiskit-ibm-runtime>=0.20",  # IBM cloud backend
+    "torch>=2.0",
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+    "scipy>=1.12",
+    "jupytext>=1.16",            # convert .py <-> .ipynb if needed
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "ipykernel",   # only if you ever need a notebook
 ]

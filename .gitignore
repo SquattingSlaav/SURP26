@@ -1,10 +1,33 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# uv
+.venv/
+.uv/
+uv.lock
 
-# Virtual environments
-.venv
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Jupyter (if ever used)
+.ipynb_checkpoints/
+*.ipynb
+
+# Figures / outputs (commit selectively)
+figures/*.png
+figures/*.pdf
+
+# Data (usually too large for git)
+data/*
+!data/.gitkeep
+
+# Editor
+.vim/
+.nvim/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.env
