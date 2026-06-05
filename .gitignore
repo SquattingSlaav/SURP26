@@ -22,6 +22,9 @@ figures/*.pdf
 data/*
 !data/.gitkeep
 
+#Notes
+!notes/.gitkeep
+
 # Editor
 .vim/
 .nvim/
