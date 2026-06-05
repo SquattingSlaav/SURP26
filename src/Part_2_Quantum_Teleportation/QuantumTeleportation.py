@@ -28,7 +28,6 @@ def build_circuit():
         qc.z(bob1)
     qc.measure(bob1, c2)
     return qc
-    qc.draw("mpl").savefig("figures/teleportation_circuit.png", dpi=150, bbox_inches="tight")
 
 def bob_stats(counts):
     zero = sum(v for k, v in counts.items() if k[0] == '0')
@@ -108,5 +107,8 @@ fig = plot_histogram([clean_counts, noisy_counts], legend=['Clean', 'Noisy'],
                      title="Bob's Qubit State: Clean vs Noisy",
                      bar_labels=True)
 fig.savefig('figures/histogram.png', dpi=150, bbox_inches='tight')
+
+build_circuit().draw("mpl").savefig("figures/teleportation_circuit.png", dpi=150, bbox_inches="tight")
+plt.close('all')
 
 print("\nPlots saved to figures/")
