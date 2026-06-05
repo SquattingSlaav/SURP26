@@ -28,6 +28,7 @@ def build_circuit():
         qc.z(bob1)
     qc.measure(bob1, c2)
     return qc
+    qc.draw("mpl").savefig("figures/teleportation_circuit.png", dpi=150, bbox_inches="tight")
 
 def bob_stats(counts):
     zero = sum(v for k, v in counts.items() if k[0] == '0')
