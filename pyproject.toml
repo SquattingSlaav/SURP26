@@ -1,18 +1,19 @@
 [project]
-name = "quantum-surp"
+name = "SURP26"
 version = "0.1.0"
 description = "SUNY Poly SURP 2026 - Quantum Neuron vs Classical Neuron"
 requires-python = ">=3.11"
 
 dependencies = [
     "qiskit>=1.0",
-    "qiskit-aer>=0.14",          # local simulator
-    "qiskit-ibm-runtime>=0.20",  # IBM cloud backend
+    "qiskit-aer>=0.14", # local simulator
+    "qiskit-ibm-runtime>=0.20", # IBM cloud backend
     "torch>=2.0",
     "numpy>=1.26",
     "matplotlib>=3.8",
     "scipy>=1.12",
-    "jupytext>=1.16",            # convert .py <-> .ipynb if needed
+    "jupytext>=1.16", # convert .py <-> .ipynb if needed
+    "pylatexenc>=2.10",
 ]
 
 [build-system]
@@ -23,3 +24,6 @@ build-backend = "hatchling.build"
 dev-dependencies = [
     "ipykernel",   # only if you ever need a notebook
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
