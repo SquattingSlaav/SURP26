@@ -64,7 +64,7 @@ def run(noise=False, shots=1024, error_rate=0.01, density_matrix=False):
     """
     qc = build_circuit(density_matrix=density_matrix)
     sim_kwargs = {}
-    if density_matrix:
+    if density_yatrix:
         sim_kwargs["method"] = "density_matrix"
     if noise:
         nm = NoiseModel()
