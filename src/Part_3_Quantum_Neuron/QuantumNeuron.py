@@ -48,7 +48,29 @@ def plot_sweep(a_vals, theta_vals, grid):
     os.makedirs("figures", exist_ok=True)
     plt.figure(figsize=(6, 5))
     plt.pcolormesh(a_vals, theta_vals, grid, shading='auto', cmap='viridis')
-    plt.colorbar(label='y = P(ancilla = 1)')
+
+    # analytic grid for comparison
+    A, T = np.meshgrid(a_vals, theta_vals)
+    analytic_grid = A * np.sin(T)**2 * np.cos(T)**2
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+    ax1.pcolormesh(a_vals, theta_vals, grid, shading='auto', cmap='viridis')
+    ax1.set_title('Simulation')
+    ax1.set_xlabel('a')
+    ax1.set_ylabel('θ')
+
+    ax2.pcolormesh(a_vals, theta_vals, analytic_grid, shading='auto', cmap='viridis')
+    ax2.set_title('Analytic: a·sin²(θ)·cos²(θ)')
+    ax2.set_xlabel('a')
+    ax2.set_ylabel('θ')
+
+    im = ax1.pcolormesh(a_vals, theta_vals, grid, shading='auto', cmap='viridis')
+    fig.colorbar(im, ax=ax1, label='y = P(ancilla = 1)')
+
+    im2 = ax2.pcolormesh(a_vals, theta_vals, analytic_grid, shading='auto', cmap='viridis')
+    fig.colorbar(im2, ax=ax2, label='y = P(ancilla = 1)')
+
     plt.xlabel('a')
     plt.ylabel('θ')
     plt.title('Quantum Neuron Output  y = f(a, θ)')
@@ -62,4 +84,4 @@ if __name__ == "__main__":
     a_vals, theta_vals, grid = data["a_vals"], data["theta_vals"], data["grid"]
     print("Saved → results/sweep.npz")
     plot_sweep(a_vals, theta_vals, grid)
-
+    build_circuit(0.5).assign_parameters({theta: np.pi/4}).decompose().draw("mpl").savefig("figures/neuron_circuit.png", dpi=150, bbox_inches="tight")
