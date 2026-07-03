@@ -20,7 +20,7 @@ def build_circuit(a):
     qc.ry(2 * np.arcsin(np.sqrt(a)), inp)
     qc.cry( 2 * theta, inp, anc)
     qc.cy(anc, out)
-    qc.rz(-np.pi / 2, anc)
+    qc.h(anc)
     qc.cry(-2 * theta, inp, anc)
     qc.measure(anc, cr)
     return qc
@@ -40,7 +40,7 @@ def sweep():
             grid[i, j] = counts.get('1', 0) / SHOTS
         print(f"theta = {theta_v:.4f}  ({i+1}/{len(theta_vals)})")
 
-    np.savez("results/sweep_rz.npz", a_vals=a_vals, theta_vals=theta_vals, grid=grid)
+    np.savez("results/sweep_h.npz", a_vals=a_vals, theta_vals=theta_vals, grid=grid)
     return a_vals, theta_vals, grid
 
 def plot_sweep(a_vals, theta_vals, grid):
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     data = np.load("results/sweep.npz")
     a_vals, theta_vals, grid = data["a_vals"], data["theta_vals"], data["grid"]
 
-    plot_sweep(a_vals, theta_vals, grid)
+    plot_sweep(a_vals, theta_vals, grid, filename="figures/comparison_h.png", title="H Circuit")
 
     build_circuit(0.5).assign_parameters({theta: np.pi / 4}).draw("mpl").savefig(
         "figures/neuron_circuit.png", dpi=150, bbox_inches="tight"
