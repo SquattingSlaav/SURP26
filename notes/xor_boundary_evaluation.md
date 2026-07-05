@@ -99,6 +99,125 @@ starting from the region-search best params (model 418).
 - `figures/xor_region_trained_comparison.png` — old vs. new full-grid maps +
   training loss curve.
 
+## Replicating the professor's MCMC architecture (2026-07-04)
+
+Professor sent a code snippet with a different architecture: three standalone
+neurons (`qneuron5` ×2 → `qneuron3b`) composed *classically* — each neuron is
+measured and its scalar output `M ∈ [0,1]` is fed as a rotation-angle input to
+the next neuron's circuit, rather than one entangled multi-qubit circuit. The
+search is a greedy single-index walk: 13 parameters stored as indices into a
+40-entry angle table, one index nudged ±1 per trial, accepted only if the
+mismatch count vs. `p_ref` (his domain-extended XOR target, scored with a
+dynamic `(max+min)/2` threshold) strictly decreases.
+
+Replicated in `src/Part_3_Quantum_Neuron/QuantumNeuronProfessorMCMC.py`, with
+two explicitly flagged guesses (his snippet omits the class bodies):
+`QNeuron3b`'s gate structure, and `angles40 = linspace(0, π/2, 40)`.
+
+### Run 1 (failed silently, 2.2 hrs)
+
+Seeded `results_old = 69` straight from his snippet — but that score belongs to
+*his* circuit. Ours scores ~184–214 at the same warm-start indices, so no ±1
+move could ever beat 69 and all 3,000 trials were rejected. Lesson: never carry
+a warm-start *score* across implementations; re-evaluate it locally. Fixed by
+computing the initial score from an actual evaluation.
+
+### Run 2 (completed, 1.9 hrs) — improvement is a shot-noise artifact
+
+- Nominal progress: 214 → 162 mismatches, 6 accepted moves (all in the first
+  ~585 trials, nothing after).
+- **Reality check**: re-scoring the final params 5 independent times gave
+  [195, 199, 204, 177, 204] — mean ≈ 196, i.e. chance level (200/400 = coin
+  flip). The "162" was a lucky 1024-shot draw that greedy strict-`<` acceptance
+  locked in permanently. Note the initial score itself fluctuated 184 vs 214
+  between runs at identical params — score noise is ±20-30.
+- Root cause: the model's output range across the whole grid is only ~0.17–0.25.
+  The dynamic threshold sits mid-band, so the thresholded mask is nearly a
+  per-cell coin flip → mismatch count ~ Binomial(400, 0.5), std ≈ 10, and a
+  greedy search on that just harvests noise minima.
+- The compressed output range itself suggests our architecture guesses
+  (`QNeuron3b` structure and/or the `angles40` range) differ from the
+  professor's actual code in ways that matter — his run reached 69/400.
+
+### Artifacts (this phase)
+
+- `src/Part_3_Quantum_Neuron/QuantumNeuronProfessorMCMC.py`
+- `results/professor_mcmc_search.npz`, `figures/professor_mcmc_search.png`
+
+### Open questions for the professor
+
+- ~~Actual `qneuron3b` circuit definition~~ → resolved 2026-07-05 (see below).
+- ~~Actual `angles40` contents~~ → he provided it: `[i*π/2/40 for i in range(40)]`.
+- ~~How his run avoids the shot-noise ratchet~~ → moot; see below.
+
+## Corrected replication from his qneuron5 reduction (2026-07-05)
+
+Professor provided `angles40` and his analytic `qneuron5` class — a classical
+reduction of the 5-param circuit — with the instruction not to use the class
+itself, but to make our circuit's **measured expectation equal his `self.M`**.
+Matching his formula against exact statevector simulation pinned down every
+convention we had guessed wrong:
+
+1. **Inputs are probabilities, not angles.** `get_expectation(M1, M2)` takes
+   `M ∈ [0,1]` (both the `phases20` grid values and upstream neuron outputs),
+   encoded as `ry(2·arcsin(√M))` — the pure state with `P(1)=M` and coherence
+   `√(M(1−M))`, exactly his `M1_01` term. Our first replication fed `M` as a
+   raw rotation angle, which is why its output was a flat noise band.
+2. **Circuit angles are 2× his parameters**: weights `ry(−2α)`, CRy pair
+   `cry(2β)…cry(−2β)`, bias `ry(2δ)`.
+3. **The phase gate is Qiskit `rz(π)`, not `rz(π/2)`.** His "Rz(π/2)" is
+   evidently the `e^{iθσz}` convention (= Qiskit `rz(2θ)`). ⚠️ This touches
+   the whole repo's "Rz(π/2) between the CRy pair" convention — every other
+   script may be running with half the intended phase. **Confirm with him.**
+4. **His (1,1) term `sin²(2β1−2β2+δ)` is unrealizable** by any circuit of this
+   family: all target-qubit RYs commute, so the four control-branch angles
+   must be additive, giving `sin²(2β1+2β2−δ)`. With that one substitution the
+   circuit matches his formula to `~9e-16` over 300 random draws (branches
+   (0,0), (1,0), (0,1) match his formula as written, exactly). Almost
+   certainly an algebra slip in his class — **flag to him** with this evidence.
+5. **`qneuron3b`** = the bare core of the 5-param neuron without the two
+   input-weight rotations: `cry(2β1), cry(2β2), rz(π),` inverse pair, `ry(2δ)`
+   — exactly 3 params, 2 probability inputs ("the 3 neuron behaves similarly").
+
+Rewrote `QuantumNeuronProfessorMCMC.py` accordingly. The search now evaluates
+with exact statevector expectations (greedy strict-`<` acceptance is
+meaningless under ±20-30 shot noise, per the run-2 finding), with a final
+1024-shot validation pass on the best model. Includes
+`verify_against_professor_formula()` which prints the machine-precision match
+and quantifies the (1,1) discrepancy at every run.
+
+Immediate effects of the corrections: output dynamic range went from a flat
+~0.17–0.25 to 0.165–0.898, per-trial cost from ~2.6 s to ~0.19 s (9.5 min per
+3,000-trial search instead of 2.2 h), and the search accepts moves
+deterministically from the very first trials.
+
+### Search results (2026-07-05)
+
+- Single greedy chain from the professor's warm start: 205 → 141 mismatches,
+  all 34 accepted moves in the first ~490 trials, then stuck — the model
+  learned a smooth *diagonal* separator (a local minimum), not XOR. The ±1
+  single-index greedy walk cannot cross the valley from "diagonal" to
+  "checkerboard" without temporarily getting worse.
+- **Random restarts fixed it.** 10 greedy chains (professor's warm start + 9
+  random starts, early-stopped after 500 trials without an accepted move),
+  18.3 min total. Final scores: [185, 142, 190, 142, **20**, 126, 127, 92,
+  196, 211] — huge spread, confirming a very rugged landscape. The best chain
+  (restart 4, random start) reached **20/400 mismatches (95% agreement)** with
+  a clear XOR checkerboard in the expectation map — well past the professor's
+  69.
+- **Caveat — the boundary is real but faint.** The best model's output range
+  is only 0.215–0.324; the median cell sits 0.010 from the dynamic threshold,
+  and 1024-shot sampling noise is ±0.014. Measured mismatch count vs shots:
+  1024 → 97, 4096 → 69, 16384 → 44 (exact: 20). So the checkerboard exists in
+  the true expectation but is not readable at 1024 shots — same
+  shot-noise-fragility theme as the original point-based XOR scoring. Worth
+  discussing whether score should reward *margin*, not just sign, if
+  shot-efficient readout matters.
+
+Artifacts: `results/professor_mcmc_search.npz` (best params/array/history,
+per-restart finals, shot check), `figures/professor_mcmc_search.png` (best
+model vs `p_ref` + per-restart progress curves).
+
 ## Status / next steps
 
 - [x] Diagnose the point-based evaluation flaw with real data.
@@ -111,3 +230,11 @@ starting from the region-search best params (model 418).
       epoch 150 (not clearly converged) — could likely push accuracy higher with
       more epochs at `lr=0.2`, or try learning-rate scheduling. Cheap to explore
       further given actual per-epoch cost is ~2s, not tens of seconds.
+- [x] Replicate the professor's classical-feedforward MCMC architecture —
+      first attempt was flat noise due to wrong conventions; corrected
+      2026-07-05 from his analytic qneuron5 reduction (machine-precision match,
+      exact statevector search + shot check).
+- [ ] Ask the professor: (a) confirm the Rz convention — his formula implies
+      Qiskit `rz(π)`, the repo has been using `rz(π/2)` everywhere; (b) his
+      qneuron5 (1,1) term looks like an algebra slip — circuit-realizable form
+      is `sin²(2β1+2β2−δ)`.
