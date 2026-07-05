@@ -20,25 +20,25 @@ def build_2to1_network(alpha, beta, p):
     cr = ClassicalRegister(1, 'creg')
     qc = QuantumCircuit(q0, q1, q2, q3, cr)
 
-    # neuron 1: q0 -> q1
+    # neuron 1: q0 -> q1, input alpha (target q1 starts in |0>)
     qc.ry(alpha, q0)
     qc.ry(p[0],  q0)
-    qc.ry(beta,  q1)
     qc.cry( p[1], q0, q1)
     qc.rz(np.pi / 2, q1)
     qc.cry(-p[1], q0, q1)
     qc.ry(p[2], q1)
 
-    # neuron 2: q2 -> q3
-    qc.ry(alpha, q2)
+    # neuron 2: q2 -> q3, input beta
+    qc.ry(beta,  q2)
     qc.ry(p[3],  q2)
-    qc.ry(beta,  q3)
     qc.cry( p[4], q2, q3)
     qc.rz(np.pi / 2, q3)
     qc.cry(-p[4], q2, q3)
     qc.ry(p[5], q3)
 
-    # neuron 3: q1 -> q3
+    # neuron 3: q1 -> q3 (3-param output neuron: weight, CRy pair, bias —
+    # same structure as the 15-param network's output neuron)
+    qc.ry(p[6], q1)
     qc.cry( p[7], q1, q3)
     qc.rz(np.pi / 2, q3)
     qc.cry(-p[7], q1, q3)
@@ -62,14 +62,14 @@ def survey_2to1(n_models=400):
     t_start = time.time()
     for m in range(n_models):
         p = np.random.choice(param_pool, size=9)
-        # enforce p[6] == p[7] (CRy pair must match)
-        p[6] = p[7]
         params[m] = p
 
-        for i, alpha in enumerate(input_vals):
-            for j, beta in enumerate(input_vals):
-                qc = build_2to1_network(alpha, beta, p)
-                results[m, i, j] = run_circuit(qc)
+        circuits = [build_2to1_network(alpha, beta, p)
+                    for alpha in input_vals for beta in input_vals]
+        res = sim.run(circuits, shots=SHOTS).result()
+        grid = [res.get_counts(k).get('1', 0) / SHOTS
+                for k in range(len(circuits))]
+        results[m] = np.reshape(grid, (len(input_vals), len(input_vals)))
 
         if (m + 1) % 20 == 0:
             elapsed = time.time() - t_start

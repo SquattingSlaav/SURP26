@@ -69,23 +69,30 @@ class QNeuron5:
         qc.ry(2 * self.p[4], 2)
         self.qc = qc
 
+        mqc = qc.copy()
+        cr = ClassicalRegister(1, 'cr')
+        mqc.add_register(cr)
+        mqc.measure(2, cr[0])
+        self.qc_meas = mqc
+
     def set_params(self, param_values):
         self.param_values = list(param_values)
 
-    def get_expectation(self, M1, M2, shots=None):
+    def _bindings(self, M1, M2):
         bindings = {self.m0: input_angle(M1), self.m1: input_angle(M2)}
-        for i in range(5):
-            bindings[self.p[i]] = self.param_values[i]
-        bound = self.qc.assign_parameters(bindings)
+        for i, p in enumerate(self.p):
+            bindings[p] = self.param_values[i]
+        return bindings
 
+    def bind_meas(self, M1, M2):
+        return self.qc_meas.assign_parameters(self._bindings(M1, M2))
+
+    def get_expectation(self, M1, M2, shots=None):
         if shots is None:
+            bound = self.qc.assign_parameters(self._bindings(M1, M2))
             self.M = Statevector.from_instruction(bound).probabilities([2])[1]
         else:
-            mqc = bound.copy()
-            cr = ClassicalRegister(1)
-            mqc.add_register(cr)
-            mqc.measure(2, cr[0])
-            counts = sim.run(mqc, shots=shots).result().get_counts()
+            counts = sim.run(self.bind_meas(M1, M2), shots=shots).result().get_counts()
             self.M = counts.get('1', 0) / shots
         return self.M
 
@@ -112,23 +119,30 @@ class QNeuron3b:
         qc.ry(2 * self.p[2], 2)
         self.qc = qc
 
+        mqc = qc.copy()
+        cr = ClassicalRegister(1, 'cr')
+        mqc.add_register(cr)
+        mqc.measure(2, cr[0])
+        self.qc_meas = mqc
+
     def set_params(self, param_values):
         self.param_values = list(param_values)
 
-    def get_expectation(self, M1, M2, shots=None):
+    def _bindings(self, M1, M2):
         bindings = {self.m0: input_angle(M1), self.m1: input_angle(M2)}
-        for i in range(3):
-            bindings[self.p[i]] = self.param_values[i]
-        bound = self.qc.assign_parameters(bindings)
+        for i, p in enumerate(self.p):
+            bindings[p] = self.param_values[i]
+        return bindings
 
+    def bind_meas(self, M1, M2):
+        return self.qc_meas.assign_parameters(self._bindings(M1, M2))
+
+    def get_expectation(self, M1, M2, shots=None):
         if shots is None:
+            bound = self.qc.assign_parameters(self._bindings(M1, M2))
             self.M = Statevector.from_instruction(bound).probabilities([2])[1]
         else:
-            mqc = bound.copy()
-            cr = ClassicalRegister(1)
-            mqc.add_register(cr)
-            mqc.measure(2, cr[0])
-            counts = sim.run(mqc, shots=shots).result().get_counts()
+            counts = sim.run(self.bind_meas(M1, M2), shots=shots).result().get_counts()
             self.M = counts.get('1', 0) / shots
         return self.M
 
@@ -188,12 +202,25 @@ def update_neuron_params(params):
     qn3_0.set_params([angles40[i] for i in params[10:13]])
 
 
+def batched_expectations(qn, input_pairs, shots):
+    # one sim.run call for a whole list of (M1, M2) inputs — the same
+    # per-circuit measurement records as looping get_expectation, minus the
+    # per-job overhead
+    circuits = [qn.bind_meas(M1, M2) for M1, M2 in input_pairs]
+    result = sim.run(circuits, shots=shots).result()
+    return np.array([result.get_counts(i).get('1', 0) / shots
+                     for i in range(len(circuits))])
+
+
 def neuron_grid(qn, shots=None):
     n = len(phases20)
+    if shots is not None:
+        pairs = [(t0, t1) for t0 in phases20 for t1 in phases20]
+        return batched_expectations(qn, pairs, shots).reshape(n, n)
     g = np.zeros((n, n))
     for i, theta0 in enumerate(phases20):
         for j, theta1 in enumerate(phases20):
-            g[i, j] = qn.get_expectation(theta0, theta1, shots=shots)
+            g[i, j] = qn.get_expectation(theta0, theta1)
     return g
 
 
@@ -204,10 +231,14 @@ def evaluate_array(g0=None, g1=None, shots=None):
     if g1 is None:
         g1 = neuron_grid(qn5_1, shots=shots)
     n = len(phases20)
-    array = np.zeros((n, n))
-    for i in range(n):
-        for j in range(n):
-            array[i, j] = qn3_0.get_expectation(g0[i, j], g1[i, j], shots=shots)
+    if shots is not None:
+        pairs = list(zip(g0.ravel(), g1.ravel()))
+        array = batched_expectations(qn3_0, pairs, shots).reshape(n, n)
+    else:
+        array = np.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                array[i, j] = qn3_0.get_expectation(g0[i, j], g1[i, j])
     return array, g0, g1
 
 
@@ -217,9 +248,9 @@ def score(array):
     return int(np.sum(np.logical_xor(mask, p_ref)))
 
 
-def run_mcmc(n_trials, params_old, verbose_every=500, patience=None):
+def run_mcmc(n_trials, params_old, verbose_every=500, patience=None, shots=None):
     update_neuron_params(params_old)
-    best_array, g0_old, g1_old = evaluate_array()
+    best_array, g0_old, g1_old = evaluate_array(shots=shots)
     results_old = score(best_array)
     start_score = results_old
     print(f"Initial score at warm-start params: {results_old} mismatches", flush=True)
@@ -241,7 +272,7 @@ def run_mcmc(n_trials, params_old, verbose_every=500, patience=None):
         # only one neuron's params changed — reuse the other layer-1 grid(s)
         g0 = None if idx_choice < 5 else g0_old
         g1 = None if 5 <= idx_choice < 10 else g1_old
-        array, g0, g1 = evaluate_array(g0, g1)
+        array, g0, g1 = evaluate_array(g0, g1, shots=shots)
         results = score(array)
 
         if results < results_old:
@@ -266,7 +297,7 @@ def run_mcmc(n_trials, params_old, verbose_every=500, patience=None):
     return params_old, results_old, start_score, best_array, history, elapsed
 
 
-def run_restarts(n_restarts=10, n_trials=3000, patience=500):
+def run_restarts(n_restarts=10, n_trials=3000, patience=500, shots=None):
     # restart 0 is the professor's warm start; the rest are random index vectors
     starts = [[1, 7, 10, 26, 6, 35, 17, 12, 6, 37, 36, 26, 1]]
     starts += [[random.randint(0, 39) for _ in range(13)]
@@ -278,7 +309,7 @@ def run_restarts(n_restarts=10, n_trials=3000, patience=500):
     for k, start in enumerate(starts):
         print(f"\n=== Restart {k}/{n_restarts - 1}: start={start} ===", flush=True)
         params, res, s0, arr, hist, el = run_mcmc(
-            n_trials, start, verbose_every=0, patience=patience)
+            n_trials, start, verbose_every=0, patience=patience, shots=shots)
         print(f"Restart {k}: {s0} -> {res} in {el:.0f}s ({len(hist)-1} trials)",
               flush=True)
         histories.append(hist)
@@ -319,29 +350,93 @@ def plot_result(best_array, results_old, shot_score, histories, best_restart):
     print("Saved → figures/professor_mcmc_search.png")
 
 
+def plot_shotbased(mean_hi_grid, hi_shots, hi_scores, locked_in, honest_scores,
+                   exact_score, histories, best_restart):
+    fig, axes = plt.subplots(1, 3, figsize=(19, 6))
+
+    im0 = axes[0].pcolormesh(phases20, phases20, mean_hi_grid, shading='auto',
+                             cmap='RdBu')
+    fig.colorbar(im0, ax=axes[0], label='measured P(1)')
+    axes[0].set_xlabel('θ1 (input probability)')
+    axes[0].set_ylabel('θ0 (input probability)')
+    axes[0].set_title(f'Best model, mean of {len(hi_scores)}× {hi_shots}-shot '
+                      f'measured grids (scores {hi_scores})')
+
+    for k, hist in enumerate(histories):
+        lw, alpha = (2.5, 1.0) if k == best_restart else (1.2, 0.6)
+        axes[1].plot(hist, linewidth=lw, alpha=alpha,
+                     label=f'restart {k}' + (' (best)' if k == best_restart else ''))
+    axes[1].set_xlabel('Trial')
+    axes[1].set_ylabel('Mismatch count')
+    axes[1].set_title(f'Greedy search progress per restart ({SHOTS}-shot scores)')
+    axes[1].legend(fontsize=8, ncol=2)
+
+    ax = axes[2]
+    x = np.random.default_rng(0).uniform(-0.08, 0.08, len(honest_scores))
+    ax.scatter(x, honest_scores, s=60, color='steelblue', zorder=5,
+               label=f'independent {SHOTS}-shot re-measurements')
+    ax.axhline(locked_in, color='crimson', linestyle='--',
+               label=f'locked-in search score ({locked_in})')
+    ax.axhline(exact_score, color='seagreen', linestyle=':',
+               label=f'exact expectation score ({exact_score})')
+    ax.set_xlim(-0.5, 0.5)
+    ax.set_xticks([])
+    ax.set_ylabel('Mismatch count')
+    ax.set_title('Locked-in vs honest re-measured score\n'
+                 '(greedy acceptance keeps lucky draws)')
+    ax.legend(fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig('figures/professor_mcmc_shotbased.png', dpi=150,
+                bbox_inches='tight')
+    print("Saved → figures/professor_mcmc_shotbased.png")
+
+
 if __name__ == "__main__":
     verify_against_professor_formula()
 
-    best, histories, finals, total = run_restarts(n_restarts=10, n_trials=3000,
-                                                  patience=500)
+    # every search score below comes from sampled measurement records
+    best, histories, finals, total = run_restarts(n_restarts=5, n_trials=3000,
+                                                  patience=500, shots=SHOTS)
 
     print(f"\nAll restarts done in {total:.1f}s ({total/60:.2f} min)")
     print(f"Final scores per restart: {finals}")
-    print(f"Best: {best['score']} mismatches (restart {best['restart']})")
+    print(f"Best (locked-in): {best['score']} mismatches (restart {best['restart']})")
     print(f"Best params (indices): {best['params']}")
 
-    print(f"\nRe-evaluating the best model with {SHOTS} shots...")
     update_neuron_params(best['params'])
-    shot_array, _, _ = evaluate_array(shots=SHOTS)
-    shot_score = score(shot_array)
-    print(f"{SHOTS}-shot mismatch count: {shot_score} (exact: {best['score']})")
 
-    np.savez("results/professor_mcmc_search.npz",
-             params_old=best['params'], results_old=best['score'],
-             shot_score=shot_score, finals=finals, best_restart=best['restart'],
-             array=best['array'], phases20=phases20,
+    print(f"\nHonest re-measurement: 5 independent {SHOTS}-shot evaluations...")
+    honest_scores = []
+    for _ in range(5):
+        arr, _, _ = evaluate_array(shots=SHOTS)
+        honest_scores.append(score(arr))
+    print(f"{SHOTS}-shot re-measured scores: {honest_scores} "
+          f"(search locked in {best['score']})")
+
+    HI_SHOTS = 16384
+    print(f"\nDefinitive measured grids: 3× at {HI_SHOTS} shots...")
+    hi_grids, hi_scores = [], []
+    for _ in range(3):
+        arr, _, _ = evaluate_array(shots=HI_SHOTS)
+        hi_grids.append(arr)
+        hi_scores.append(score(arr))
+    print(f"{HI_SHOTS}-shot scores: {hi_scores}")
+
+    exact_array, _, _ = evaluate_array()
+    exact_score = score(exact_array)
+    print(f"Exact-expectation score of the same params (for reference): {exact_score}")
+
+    np.savez("results/professor_mcmc_shotbased.npz",
+             params_old=best['params'], locked_in_score=best['score'],
+             honest_scores=honest_scores, hi_shots=HI_SHOTS,
+             hi_grids=np.array(hi_grids), hi_scores=hi_scores,
+             exact_score=exact_score, exact_array=exact_array,
+             finals=finals, best_restart=best['restart'],
+             search_array=best['array'], phases20=phases20,
              history=np.array(histories[best['restart']]))
 
-    plot_result(best['array'], best['score'], shot_score, histories,
-                best['restart'])
+    plot_shotbased(np.mean(hi_grids, axis=0), HI_SHOTS, hi_scores,
+                   best['score'], honest_scores, exact_score,
+                   histories, best['restart'])
     print("Done.")
