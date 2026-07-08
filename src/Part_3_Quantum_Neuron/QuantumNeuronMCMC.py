@@ -14,7 +14,7 @@ os.makedirs("figures", exist_ok=True)
 
 sim = AerSimulator()
 
-angles40 = [i * np.pi / 2 / 40 for i in range(40)]  # professor's exact definition
+angles40 = [i * np.pi / 2 / 40 for i in range(40)]  # exact definition, matches the reference spec
 phases20 = [i * 0.05 for i in range(20)]  # grid of input *probabilities* M in [0, 0.95]
 
 # domain-extended XOR ground truth: True where (i,j) fall in the *same* half
@@ -25,21 +25,15 @@ p_ref = np.array(
 )
 
 
-# Conventions below were pinned down by matching the professor's analytic
-# qneuron5 reduction against exact statevector simulation (max |dM| ~ 1e-16):
-#   - inputs are probabilities M in [0,1], encoded as ry(2*arcsin(sqrt(M)))
-#     (the pure state with P(1)=M and coherence sqrt(M(1-M)), matching his
-#     M1_01 = sqrt(M1_11 * (1 - M1_11)) term)
-#   - circuit angles are 2x his parameters: weights ry(-2*alpha), CRy pair
-#     cry(2*beta) ... cry(-2*beta), bias ry(2*delta)
-#   - the phase gate between the CRy pair is rz(pi), NOT rz(pi/2): his
-#     "Rz(pi/2)" is the e^{i*theta*sigma_z} convention = Qiskit rz(2*theta).
-#     Deliberate deviation from this repo's rz(pi/2) convention, needed to
-#     match his formula on control branches (0,0), (1,0), (0,1) exactly.
-#   - his (1,1) term sin^2(2b1 - 2b2 + d) is unrealizable by any arrangement
-#     of CRys + unconditional phase gates on the target (target RYs commute,
-#     so branch angles are additive); the circuit gives sin^2(2b1 + 2b2 - d).
-#     verify_against_professor_formula() quantifies this discrepancy.
+# Circuit angles here are 2x reference_M's parameters (weights ry(-2*alpha),
+# CRy pair cry(2*beta)...cry(-2*beta), bias ry(2*delta)), and the phase gate
+# is rz(pi) rather than this repo's usual rz(pi/2) — reference_M's "Rz(pi/2)"
+# uses the e^{i*theta*sigma_z} convention, i.e. Qiskit rz(2*theta). Both are
+# deliberate deviations needed to match reference_M to ~1e-16 (see
+# verify_against_reference_formula and notes/xor_boundary_evaluation.md).
+# The one exception is reference_M's (1,1) term, sin^2(2b1-2b2+d): no
+# CRy/phase-gate circuit can realize it since target-qubit RYs commute, so
+# branch angles are additive — the circuit gives sin^2(2b1+2b2-d) instead.
 
 def input_angle(M):
     return 2 * np.arcsin(np.sqrt(np.clip(M, 0.0, 1.0)))
@@ -147,8 +141,8 @@ class QNeuron3b:
         return self.M
 
 
-def professor_M(M1, M2, a1, a2, b1, b2, d, additive_11=False):
-    # the professor's analytic qneuron5.get_expectation, verbatim; with
+def reference_M(M1, M2, a1, a2, b1, b2, d, additive_11=False):
+    # the reference analytic qneuron5.get_expectation, verbatim; with
     # additive_11=True the (1,1) term is replaced by the circuit-realizable
     # additive form sin^2(2b1 + 2b2 - d)
     M1_00 = 1.0 - M1
@@ -168,9 +162,9 @@ def professor_M(M1, M2, a1, a2, b1, b2, d, additive_11=False):
             rho11A * rho11B * t11)
 
 
-def verify_against_professor_formula(n_draws=300, seed=0):
-    # the professor's stated key requirement: the circuit's measurement
-    # expectation must equal his analytic self.M
+def verify_against_reference_formula(n_draws=300, seed=0):
+    # the stated key requirement: the circuit's measurement
+    # expectation must equal the reference analytic self.M
     rng = np.random.default_rng(seed)
     errs_as_written, errs_additive = [], []
     for _ in range(n_draws):
@@ -178,15 +172,15 @@ def verify_against_professor_formula(n_draws=300, seed=0):
         w = rng.uniform(0, np.pi / 2, 5)
         qn = QNeuron5(w)
         circ = qn.get_expectation(M1, M2)
-        errs_as_written.append(abs(circ - professor_M(M1, M2, *w)))
-        errs_additive.append(abs(circ - professor_M(M1, M2, *w, additive_11=True)))
+        errs_as_written.append(abs(circ - reference_M(M1, M2, *w)))
+        errs_additive.append(abs(circ - reference_M(M1, M2, *w, additive_11=True)))
 
-    print("=== Verification: circuit expectation vs professor's self.M ===")
-    print(f"vs his formula as written:        max|dM| = {max(errs_as_written):.2e}  "
+    print("=== Verification: circuit expectation vs reference self.M ===")
+    print(f"vs the reference formula as written:  max|dM| = {max(errs_as_written):.2e}  "
           f"mean = {np.mean(errs_as_written):.2e}")
     print(f"vs formula with additive (1,1):   max|dM| = {max(errs_additive):.2e}  "
           f"mean = {np.mean(errs_additive):.2e}")
-    print("(the residual against the as-written formula is confined to his "
+    print("(the residual against the as-written formula is confined to the reference "
           "(1,1) term,\n which no CRy/phase-gate circuit can realize — see notes)\n")
     return max(errs_additive)
 
@@ -298,7 +292,7 @@ def run_mcmc(n_trials, params_old, verbose_every=500, patience=None, shots=None)
 
 
 def run_restarts(n_restarts=10, n_trials=3000, patience=500, shots=None):
-    # restart 0 is the professor's warm start; the rest are random index vectors
+    # restart 0 is the fixed warm start; the rest are random index vectors
     starts = [[1, 7, 10, 26, 6, 35, 17, 12, 6, 37, 36, 26, 1]]
     starts += [[random.randint(0, 39) for _ in range(13)]
                for _ in range(n_restarts - 1)]
@@ -321,7 +315,7 @@ def run_restarts(n_restarts=10, n_trials=3000, patience=500, shots=None):
     return best, histories, finals, total
 
 
-def plot_result(best_array, results_old, shot_score, histories, best_restart):
+def plot_result(best_array, results_old, shot_score, histories, best_restart, fname=None):
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
     im0 = axes[0].pcolormesh(phases20, phases20, best_array, shading='auto', cmap='RdBu')
@@ -346,12 +340,13 @@ def plot_result(best_array, results_old, shot_score, histories, best_restart):
     axes[2].legend(fontsize=8, ncol=2)
 
     plt.tight_layout()
-    plt.savefig('figures/professor_mcmc_search.png', dpi=150, bbox_inches='tight')
-    print("Saved → figures/professor_mcmc_search.png")
+    fname = fname or 'figures/mcmc_search.png'
+    plt.savefig(fname, dpi=150, bbox_inches='tight')
+    print(f"Saved → {fname}")
 
 
 def plot_shotbased(mean_hi_grid, hi_shots, hi_scores, locked_in, honest_scores,
-                   exact_score, histories, best_restart):
+                   exact_score, histories, best_restart, fname=None):
     fig, axes = plt.subplots(1, 3, figsize=(19, 6))
 
     im0 = axes[0].pcolormesh(phases20, phases20, mean_hi_grid, shading='auto',
@@ -387,13 +382,13 @@ def plot_shotbased(mean_hi_grid, hi_shots, hi_scores, locked_in, honest_scores,
     ax.legend(fontsize=9)
 
     plt.tight_layout()
-    plt.savefig('figures/professor_mcmc_shotbased.png', dpi=150,
-                bbox_inches='tight')
-    print("Saved → figures/professor_mcmc_shotbased.png")
+    fname = fname or 'figures/mcmc_shotbased.png'
+    plt.savefig(fname, dpi=150, bbox_inches='tight')
+    print(f"Saved → {fname}")
 
 
 if __name__ == "__main__":
-    verify_against_professor_formula()
+    verify_against_reference_formula()
 
     # every search score below comes from sampled measurement records
     best, histories, finals, total = run_restarts(n_restarts=5, n_trials=3000,
@@ -403,6 +398,13 @@ if __name__ == "__main__":
     print(f"Final scores per restart: {finals}")
     print(f"Best (locked-in): {best['score']} mismatches (restart {best['restart']})")
     print(f"Best params (indices): {best['params']}")
+
+    # QuantumNeuronFigures.py reads these back in
+    np.savez("results/mcmc_search.npz",
+             params_old=best['params'], results_old=best['score'], array=best['array'],
+             finals=finals, best_restart=best['restart'], phases20=phases20,
+             history=np.array(histories[best['restart']]))
+    plot_result(best['array'], best['score'], best['score'], histories, best['restart'])
 
     update_neuron_params(best['params'])
 
@@ -427,7 +429,7 @@ if __name__ == "__main__":
     exact_score = score(exact_array)
     print(f"Exact-expectation score of the same params (for reference): {exact_score}")
 
-    np.savez("results/professor_mcmc_shotbased.npz",
+    np.savez("results/mcmc_shotbased.npz",
              params_old=best['params'], locked_in_score=best['score'],
              honest_scores=honest_scores, hi_shots=HI_SHOTS,
              hi_grids=np.array(hi_grids), hi_scores=hi_scores,

@@ -2,7 +2,7 @@
 
 ## Problem
 
-Professor feedback (2026-07-01): scoring the 15-param quantum networks on XOR by
+Shing Chi's feedback (2026-07-01): scoring the 15-param quantum networks on XOR by
 checking only 4 discrete input points — `(0,0), (0,π/2), (π/2,0), (π/2,π/2)` — is
 flawed. A model can classify those 4 exact points correctly without actually
 implementing a genuine XOR-shaped decision boundary across the continuous input
@@ -99,9 +99,9 @@ starting from the region-search best params (model 418).
 - `figures/xor_region_trained_comparison.png` — old vs. new full-grid maps +
   training loss curve.
 
-## Replicating the professor's MCMC architecture (2026-07-04)
+## Replicating Shing Chi's MCMC architecture (2026-07-04)
 
-Professor sent a code snippet with a different architecture: three standalone
+Shing Chi sent a code snippet with a different architecture: three standalone
 neurons (`qneuron5` ×2 → `qneuron3b`) composed *classically* — each neuron is
 measured and its scalar output `M ∈ [0,1]` is fed as a rotation-angle input to
 the next neuron's circuit, rather than one entangled multi-qubit circuit. The
@@ -110,7 +110,7 @@ search is a greedy single-index walk: 13 parameters stored as indices into a
 mismatch count vs. `p_ref` (his domain-extended XOR target, scored with a
 dynamic `(max+min)/2` threshold) strictly decreases.
 
-Replicated in `src/Part_3_Quantum_Neuron/QuantumNeuronProfessorMCMC.py`, with
+Replicated in `src/Part_3_Quantum_Neuron/QuantumNeuronMCMC.py`, with
 two explicitly flagged guesses (his snippet omits the class bodies):
 `QNeuron3b`'s gate structure, and `angles40 = linspace(0, π/2, 40)`.
 
@@ -137,14 +137,14 @@ computing the initial score from an actual evaluation.
   greedy search on that just harvests noise minima.
 - The compressed output range itself suggests our architecture guesses
   (`QNeuron3b` structure and/or the `angles40` range) differ from the
-  professor's actual code in ways that matter — his run reached 69/400.
+  Shing Chi's actual code in ways that matter — his run reached 69/400.
 
 ### Artifacts (this phase)
 
-- `src/Part_3_Quantum_Neuron/QuantumNeuronProfessorMCMC.py`
-- `results/professor_mcmc_search.npz`, `figures/professor_mcmc_search.png`
+- `src/Part_3_Quantum_Neuron/QuantumNeuronMCMC.py`
+- `results/mcmc_search.npz`, `figures/mcmc_search.png`
 
-### Open questions for the professor
+### Open questions for Shing Chi
 
 - ~~Actual `qneuron3b` circuit definition~~ → resolved 2026-07-05 (see below).
 - ~~Actual `angles40` contents~~ → he provided it: `[i*π/2/40 for i in range(40)]`.
@@ -152,7 +152,7 @@ computing the initial score from an actual evaluation.
 
 ## Corrected replication from his qneuron5 reduction (2026-07-05)
 
-Professor provided `angles40` and his analytic `qneuron5` class — a classical
+Shing Chi provided `angles40` and his analytic `qneuron5` class — a classical
 reduction of the 5-param circuit — with the instruction not to use the class
 itself, but to make our circuit's **measured expectation equal his `self.M`**.
 Matching his formula against exact statevector simulation pinned down every
@@ -179,11 +179,11 @@ convention we had guessed wrong:
    input-weight rotations: `cry(2β1), cry(2β2), rz(π),` inverse pair, `ry(2δ)`
    — exactly 3 params, 2 probability inputs ("the 3 neuron behaves similarly").
 
-Rewrote `QuantumNeuronProfessorMCMC.py` accordingly. The search now evaluates
+Rewrote `QuantumNeuronMCMC.py` accordingly. The search now evaluates
 with exact statevector expectations (greedy strict-`<` acceptance is
 meaningless under ±20-30 shot noise, per the run-2 finding), with a final
 1024-shot validation pass on the best model. Includes
-`verify_against_professor_formula()` which prints the machine-precision match
+`verify_against_reference_formula()` which prints the machine-precision match
 and quantifies the (1,1) discrepancy at every run.
 
 Immediate effects of the corrections: output dynamic range went from a flat
@@ -193,17 +193,17 @@ deterministically from the very first trials.
 
 ### Search results (2026-07-05)
 
-- Single greedy chain from the professor's warm start: 205 → 141 mismatches,
+- Single greedy chain from Shing Chi's warm start: 205 → 141 mismatches,
   all 34 accepted moves in the first ~490 trials, then stuck — the model
   learned a smooth *diagonal* separator (a local minimum), not XOR. The ±1
   single-index greedy walk cannot cross the valley from "diagonal" to
   "checkerboard" without temporarily getting worse.
-- **Random restarts fixed it.** 10 greedy chains (professor's warm start + 9
+- **Random restarts fixed it.** 10 greedy chains (Shing Chi's warm start + 9
   random starts, early-stopped after 500 trials without an accepted move),
   18.3 min total. Final scores: [185, 142, 190, 142, **20**, 126, 127, 92,
   196, 211] — huge spread, confirming a very rugged landscape. The best chain
   (restart 4, random start) reached **20/400 mismatches (95% agreement)** with
-  a clear XOR checkerboard in the expectation map — well past the professor's
+  a clear XOR checkerboard in the expectation map — well past Shing Chi's
   69.
 - **Caveat — the boundary is real but faint.** The best model's output range
   is only 0.215–0.324; the median cell sits 0.010 from the dynamic threshold,
@@ -214,18 +214,18 @@ deterministically from the very first trials.
   discussing whether score should reward *margin*, not just sign, if
   shot-efficient readout matters.
 
-Artifacts: `results/professor_mcmc_search.npz` (best params/array/history,
-per-restart finals, shot check), `figures/professor_mcmc_search.png` (best
+Artifacts: `results/mcmc_search.npz` (best params/array/history,
+per-restart finals, shot check), `figures/mcmc_search.png` (best
 model vs `p_ref` + per-restart progress curves).
 
 ## Circuit audit: 3-param and 2to1 (2026-07-05)
 
-Prompted by comparing architectures against the professor's snippet, audited
+Prompted by comparing architectures against Shing Chi's snippet, audited
 the older neuron circuits. The consistent family (confirmed by the user's
 3-param circuit diagram) is: **3-param neuron = input-weight RY + CRy pair +
 RY bias**; networks compose as first-layer neurons + a 3-param output neuron.
 Under that definition the "15-param" network is really 13 params (5+5+3) —
-which exactly matches the professor's `qneuron5 + qneuron5 + qneuron3b`
+which exactly matches Shing Chi's `qneuron5 + qneuron5 + qneuron3b`
 structure — and the "9-param" 2to1 should be 3+3+3.
 
 Two bugs found and fixed:
@@ -242,7 +242,7 @@ Two bugs found and fixed:
    the survey to a 10×10×10 (w0, θ1, θ2) grid; old `survey_3param.npz` is
    2-param data. Re-run pending.
 
-Neither circuit feeds the XOR pipeline or the professor-MCMC replication, so
+Neither circuit feeds the XOR pipeline or the MCMC replication, so
 those results are unaffected. Both survey loops were also batched (one
 `sim.run` per 400-circuit input grid) for ~10-15x speedup.
 
@@ -259,7 +259,7 @@ CLAUDE.md's old "Neuron architectures"/"Survey conventions" sections described
 the buggy circuits (they were written from that code) and were rewritten to
 match the corrected family.
 
-**Structural observation for the professor**: in single-circuit *entangled*
+**Structural observation for Shing Chi**: in single-circuit *entangled*
 composition, a hidden neuron's bias and the output neuron's weight on the same
 qubit (e.g. `ry(p2, q1)` directly followed by `ry(p6, q1)` in the 2to1;
 `ry(p4, q2)` / `ry(p10, q2)` in the 15-param) are consecutive RYs and merge
@@ -269,15 +269,15 @@ feedforward composition the measurement between layers breaks the merge, so
 the parameters are genuinely independent. A real structural difference between
 the two composition styles.
 
-Reference from the professor (2026-07-05): his best model's expectation map
+Reference from Shing Chi (2026-07-05): his best model's expectation map
 spans ~0.57–0.87 (margin ~0.30) over the θ1, θ2 ∈ [0,1] plane — much larger
 margins than our statevector-search winner (0.22–0.32), i.e. far more robust
 to shot readout. Useful benchmark for the fully shot-based search.
 
-## Figures for the professor (2026-07-05)
+## Figures for Shing Chi (2026-07-05)
 
 Presentation order, one talking point each
-(generated by `src/Part_3_Quantum_Neuron/QuantumNeuronProfessorFigures.py`
+(generated by `src/Part_3_Quantum_Neuron/QuantumNeuronFigures.py`
 plus earlier scripts):
 
 1. `figures/xor_boundary_comparison.png` — your point-based feedback was
@@ -286,18 +286,18 @@ plus earlier scripts):
 2. `figures/xor_region_trained_comparison.png` — retraining against a
    16-point region loss instead of the 4 corners: 78% → 86.5% full-grid
    region accuracy.
-3. `figures/professor_formula_verification.png` — our circuit's measured
+3. `figures/formula_verification.png` — our circuit's measured
    expectation equals your analytic `self.M` to ~1e-15... once the (1,1)
    term is `sin²(2β1+2β2−δ)`. As written, `sin²(2β1−2β2+δ)` can't come from
    any CRy/phase circuit (branch angles must be additive). *Question: also
    confirm the Rz convention — matching requires Qiskit `rz(π)`, i.e. your
    "Rz(π/2)" in the `e^{iθσz}` convention; our other scripts use Qiskit
    `rz(π/2)`.*
-4. `figures/professor_mcmc_search.png` — your architecture + greedy search
+4. `figures/mcmc_search.png` — your architecture + greedy search
    with 10 random restarts: best model 20/400 mismatches (95%), a real XOR
    checkerboard. Single chains get stuck (final scores 20–211 depending on
    start).
-5. `figures/professor_mcmc_shot_budget.png` — the caveat: the checkerboard
+5. `figures/mcmc_shot_budget.png` — the caveat: the checkerboard
    margin (median 0.010) is below the 1024-shot noise floor (±0.014), so the
    measured score is ~97 at 1024 shots and still ~45 at 16384. *Discussion
    point: should the score reward margin, not just sign?*
@@ -314,11 +314,11 @@ plus earlier scripts):
       epoch 150 (not clearly converged) — could likely push accuracy higher with
       more epochs at `lr=0.2`, or try learning-rate scheduling. Cheap to explore
       further given actual per-epoch cost is ~2s, not tens of seconds.
-- [x] Replicate the professor's classical-feedforward MCMC architecture —
+- [x] Replicate Shing Chi's classical-feedforward MCMC architecture —
       first attempt was flat noise due to wrong conventions; corrected
       2026-07-05 from his analytic qneuron5 reduction (machine-precision match,
       exact statevector search + shot check).
-- [ ] Ask the professor: (a) confirm the Rz convention — his formula implies
+- [ ] Ask Shing Chi: (a) confirm the Rz convention — his formula implies
       Qiskit `rz(π)`, the repo has been using `rz(π/2)` everywhere; (b) his
       qneuron5 (1,1) term looks like an algebra slip — circuit-realizable form
       is `sin²(2β1+2β2−δ)`.

@@ -36,7 +36,7 @@ def build_circuit():
     qc.ry(params[5], q3)
 
     # neuron 3: q1 -> q3 (params 6,7,8)
-    qc.ry(params[6], q1)        # add this line
+    qc.ry(params[6], q1)
     qc.cry(2 * params[7], q1, q3)
     qc.rz(np.pi / 2, q3)
     qc.cry(-2 * params[7], q1, q3)
@@ -55,24 +55,21 @@ def mcmc_sweep(n_samples=10000, step_size=0.3):
     qc       = build_circuit()
     compiled = transpile(qc, sim, optimization_level=0)
 
-    # storage
     chain  = np.zeros((n_samples, 9))
     values = np.zeros(n_samples)
 
-    # initialise randomly
     current = np.random.uniform(0, np.pi, 9)
     current_val = run_circuit(compiled, sim, current)
 
     t_start = time.time()
     accepted = 0
     for i in range(n_samples):
-        # propose new point
         proposal = current + np.random.normal(0, step_size, 9)
         proposal = np.clip(proposal, 0, np.pi)
 
         proposal_val = run_circuit(compiled, sim, proposal)
 
-        # Metropolis acceptance (uniform target — just exploring)
+        # uniform target (just exploring), so acceptance is a coin flip, not exp(-dE/T)
         if np.random.rand() < 0.5:
             current     = proposal
             current_val = proposal_val

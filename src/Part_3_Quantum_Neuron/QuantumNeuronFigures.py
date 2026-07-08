@@ -1,14 +1,14 @@
-# Figures for the professor meeting: (1) verification that the circuit's
-# measured expectation equals his analytic qneuron5 self.M (and where his
-# (1,1) term departs), (2) shot-budget readout cost of the best XOR model
-# found by the restart search. The professor's formula is used only as a
+# Figures for the results-review meeting: (1) verification that the circuit's
+# measured expectation equals the reference analytic qneuron5 self.M (and where
+# its (1,1) term departs), (2) shot-budget readout cost of the best XOR model
+# found by the restart search. The reference formula is used only as a
 # verification reference here — the model itself is always the circuit.
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-from QuantumNeuronProfessorMCMC import (
-    QNeuron5, professor_M, update_neuron_params, evaluate_array, score,
+from QuantumNeuronMCMC import (
+    QNeuron5, reference_M, update_neuron_params, evaluate_array, score,
     phases20, SHOTS,
 )
 
@@ -17,29 +17,29 @@ os.makedirs("figures", exist_ok=True)
 
 def fig_formula_verification(n_draws=300, seed=0):
     rng = np.random.default_rng(seed)
-    circ_vals, prof_written, prof_additive = [], [], []
+    circ_vals, ref_written, ref_additive = [], [], []
     for _ in range(n_draws):
         M1, M2 = rng.uniform(0, 1, 2)
         w = rng.uniform(0, np.pi / 2, 5)
         qn = QNeuron5(w)
         circ_vals.append(qn.get_expectation(M1, M2))
-        prof_written.append(professor_M(M1, M2, *w))
-        prof_additive.append(professor_M(M1, M2, *w, additive_11=True))
+        ref_written.append(reference_M(M1, M2, *w))
+        ref_additive.append(reference_M(M1, M2, *w, additive_11=True))
     circ_vals = np.array(circ_vals)
-    prof_written = np.array(prof_written)
-    prof_additive = np.array(prof_additive)
+    ref_written = np.array(ref_written)
+    ref_additive = np.array(ref_additive)
 
     fig, axes = plt.subplots(1, 3, figsize=(19, 6))
 
-    for ax, prof, title in (
-        (axes[0], prof_written,
-         "Professor's formula as written"),
-        (axes[1], prof_additive,
+    for ax, ref, title in (
+        (axes[0], ref_written,
+         "Reference formula as written"),
+        (axes[1], ref_additive,
          "With additive (1,1) term  sin²(2β1+2β2−δ)"),
     ):
-        ax.scatter(prof, circ_vals, s=14, alpha=0.6, color='steelblue')
+        ax.scatter(ref, circ_vals, s=14, alpha=0.6, color='steelblue')
         ax.plot([0, 1], [0, 1], color='grey', linestyle='--', linewidth=1)
-        max_err = np.max(np.abs(prof - circ_vals))
+        max_err = np.max(np.abs(ref - circ_vals))
         ax.set_xlabel('analytic  self.M')
         ax.set_ylabel('circuit expectation (exact statevector)')
         ax.set_title(f'{title}\nmax |ΔM| = {max_err:.2e}  ({n_draws} random draws)')
@@ -48,7 +48,7 @@ def fig_formula_verification(n_draws=300, seed=0):
     # branch coefficients vs delta: controls forced to |a>|b>, input weights 0
     b1, b2 = rng.uniform(0, np.pi / 2, 2)
     deltas = np.linspace(0, np.pi / 2, 100)
-    prof_branch = {
+    ref_branch = {
         (0, 0): lambda d: np.sin(d)**2,
         (1, 0): lambda d: np.sin(2 * b1 - d)**2,
         (0, 1): lambda d: np.sin(2 * b2 - d)**2,
@@ -57,7 +57,7 @@ def fig_formula_verification(n_draws=300, seed=0):
     colors = {(0, 0): 'tab:blue', (1, 0): 'tab:green',
               (0, 1): 'tab:orange', (1, 1): 'tab:red'}
     ax = axes[2]
-    for (a, b), f in prof_branch.items():
+    for (a, b), f in ref_branch.items():
         circ_curve = [QNeuron5([0, 0, b1, b2, d]).get_expectation(a, b)
                       for d in deltas]
         ax.plot(deltas, circ_curve, color=colors[(a, b)], linewidth=2,
@@ -67,17 +67,17 @@ def fig_formula_verification(n_draws=300, seed=0):
     ax.set_xlabel('δ')
     ax.set_ylabel('P(1) of target qubit')
     ax.set_title(f'Control-branch coefficients (β1={b1:.2f}, β2={b2:.2f})\n'
-                 'solid = circuit, dashed = his formula; only (1,1) separates')
+                 'solid = circuit, dashed = reference formula; only (1,1) separates')
     ax.legend(fontsize=8)
 
     plt.tight_layout()
-    plt.savefig('figures/professor_formula_verification.png', dpi=150,
+    plt.savefig('figures/formula_verification.png', dpi=150,
                 bbox_inches='tight')
-    print("Saved → figures/professor_formula_verification.png")
+    print("Saved → figures/formula_verification.png")
 
 
 def fig_shot_budget(budgets=(256, 1024, 4096, 16384), n_repeats=3):
-    d = np.load('results/professor_mcmc_search.npz')
+    d = np.load('results/mcmc_search.npz')
     best_params = [int(v) for v in d['params_old']]
     exact_array = d['array']
     exact_score = int(d['results_old'])
@@ -127,14 +127,14 @@ def fig_shot_budget(budgets=(256, 1024, 4096, 16384), n_repeats=3):
     ax.legend(fontsize=9)
 
     plt.tight_layout()
-    plt.savefig('figures/professor_mcmc_shot_budget.png', dpi=150,
+    plt.savefig('figures/mcmc_shot_budget.png', dpi=150,
                 bbox_inches='tight')
-    print("Saved → figures/professor_mcmc_shot_budget.png")
+    print("Saved → figures/mcmc_shot_budget.png")
 
 
 def survey_style_map(array, fname):
     # single-panel expectation map in the survey house style, matching the
-    # professor's best-model figure: autoscaled RdBu, plain theta axes
+    # reference best-model figure: autoscaled RdBu, plain theta axes
     fig, ax = plt.subplots(figsize=(6.5, 5.5))
     im = ax.pcolormesh(phases20, phases20, array, shading='auto', cmap='RdBu')
     fig.colorbar(im, ax=ax, label='expectation')
@@ -147,16 +147,16 @@ def survey_style_map(array, fname):
 
 
 def fig_survey_style_maps():
-    d = np.load('results/professor_mcmc_search.npz')
-    survey_style_map(d['array'], 'figures/professor_mcmc_best_map.png')
+    d = np.load('results/mcmc_search.npz')
+    survey_style_map(d['array'], 'figures/mcmc_best_map.png')
 
-    ds = np.load('results/professor_mcmc_shotbased.npz')
+    ds = np.load('results/mcmc_shotbased.npz')
     survey_style_map(ds['hi_grids'].mean(axis=0),
-                     'figures/professor_mcmc_shotbased_map.png')
+                     'figures/mcmc_shotbased_map.png')
 
 
 def fig_best_model_measured(hi_shots=16384, n_repeats=3):
-    d = np.load('results/professor_mcmc_search.npz')
+    d = np.load('results/mcmc_search.npz')
     update_neuron_params([int(v) for v in d['params_old']])
 
     grids, scores = [], []
@@ -167,11 +167,11 @@ def fig_best_model_measured(hi_shots=16384, n_repeats=3):
     print(f"best model, {hi_shots}-shot measured scores: {scores} "
           f"(exact: {int(d['results_old'])})")
 
-    np.savez('results/professor_mcmc_best_measured.npz',
+    np.savez('results/mcmc_best_measured.npz',
              grids=np.array(grids), scores=scores, hi_shots=hi_shots,
              params=d['params_old'])
     survey_style_map(np.mean(grids, axis=0),
-                     'figures/professor_mcmc_best_map_measured.png')
+                     'figures/mcmc_best_map_measured.png')
 
 
 if __name__ == "__main__":

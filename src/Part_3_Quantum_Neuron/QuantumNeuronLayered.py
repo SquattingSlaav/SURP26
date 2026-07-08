@@ -12,7 +12,6 @@ os.makedirs("figures", exist_ok=True)
 sim = AerSimulator()
 
 def build_2to1_network(alpha, beta, p):
-    # p is a list of 9 parameters
     q0 = QuantumRegister(1, 'qreg_0')
     q1 = QuantumRegister(1, 'qreg_1')
     q2 = QuantumRegister(1, 'qreg_2')
