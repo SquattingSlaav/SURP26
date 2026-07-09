@@ -5,8 +5,8 @@ import random
 import time
 
 from QuantumNeuronMCMC import (
-    update_neuron_params, evaluate_array, score, phases20, SHOTS,
-    plot_result, plot_shotbased,
+    update_neuron_params, network_array, score_train, score_test,
+    train_mask, test_mask, phases20, SHOTS, plot_result, plot_shotbased,
 )
 
 os.makedirs("results", exist_ok=True)
@@ -51,12 +51,6 @@ def accept(new_score, old_score, T):
     return random.random() < np.exp(-(new_score - old_score) / T)
 
 
-# greedy search from this warm start got permanently stuck at 141 mismatches
-# (notes/xor_boundary_evaluation.md, "Search results 2026-07-05") — reference
-# line for whether annealed MH can escape that trap.
-DOCUMENTED_GREEDY_TRAP_SCORE = 141
-
-
 def make_chain_configs(n_chains, ladder=T0_LADDER_FULL, seed=42):
     # chain 0: warm start at lowest T (near-greedy); chain 1: same warm start
     # at highest T (A/B test of escaping the greedy trap); rest: random starts
@@ -80,8 +74,8 @@ def make_chain_configs(n_chains, ladder=T0_LADDER_FULL, seed=42):
 
 def run_mh_chain(chain_id, start_params, T0, n_trials, snapshot_every=50):
     update_neuron_params(start_params)
-    array, g0, g1 = evaluate_array(shots=None)
-    cur_score = score(array)
+    array = network_array(shots=None)
+    cur_score, _ = score_train(array)
     cur_params = list(start_params)
     best_score = cur_score
     best_params = list(cur_params)
@@ -91,16 +85,14 @@ def run_mh_chain(chain_id, start_params, T0, n_trials, snapshot_every=50):
     t_start = time.time()
     for trial in range(n_trials):
         T = temperature(trial, n_trials, T0)
-        proposal, idx = propose(cur_params)
+        proposal, _ = propose(cur_params)
         update_neuron_params(proposal)
-        g0_arg = None if idx < 5 else g0
-        g1_arg = None if 5 <= idx < 10 else g1
-        arr, g0n, g1n = evaluate_array(g0_arg, g1_arg, shots=None)
-        new_score = score(arr)
+        arr = network_array(shots=None)
+        new_score, _ = score_train(arr)
 
         if accept(new_score, cur_score, T):
             cur_params, cur_score = proposal, new_score
-            array, g0, g1 = arr, g0n, g1n
+            array = arr
             if new_score < best_score:
                 best_score, best_params = new_score, list(proposal)
         else:
@@ -125,8 +117,7 @@ def run_chains(n_chains, n_trials, snapshot_every=50):
     if n_chains > 1:
         print(f"Chains 0 and 1 both start from the fixed warm start "
               f"(T0={T0s[0]} vs T0={T0s[1]}) -- same-start, different-temperature "
-              f"A/B test against the documented greedy trap "
-              f"({DOCUMENTED_GREEDY_TRAP_SCORE} mismatches).")
+              f"A/B test of whether real MH escapes where greedy gets stuck.")
 
     results = []
     t_start = time.time()
@@ -154,26 +145,34 @@ def build_snapshot_pool(results):
 def honest_validation(best_params):
     update_neuron_params(best_params)
     print(f"\nHonest re-measurement: 5 independent {SHOTS}-shot evaluations...")
-    honest_scores = []
+    honest_scores, honest_test_scores = [], []
     for _ in range(5):
-        arr, _, _ = evaluate_array(shots=SHOTS)
-        honest_scores.append(score(arr))
-    print(f"{SHOTS}-shot re-measured scores: {honest_scores}")
+        arr = network_array(shots=SHOTS)
+        train_s, thr = score_train(arr)
+        honest_scores.append(train_s)
+        honest_test_scores.append(score_test(arr, thr))
+    print(f"{SHOTS}-shot re-measured train scores: {honest_scores}")
+    print(f"{SHOTS}-shot re-measured test scores: {honest_test_scores}")
 
     HI_SHOTS = 16384
     print(f"\nDefinitive measured grids: 3x at {HI_SHOTS} shots...")
-    hi_grids, hi_scores = [], []
+    hi_grids, hi_scores, hi_test_scores = [], [], []
     for _ in range(3):
-        arr, _, _ = evaluate_array(shots=HI_SHOTS)
+        arr = network_array(shots=HI_SHOTS)
         hi_grids.append(arr)
-        hi_scores.append(score(arr))
-    print(f"{HI_SHOTS}-shot scores: {hi_scores}")
+        train_s, thr = score_train(arr)
+        hi_scores.append(train_s)
+        hi_test_scores.append(score_test(arr, thr))
+    print(f"{HI_SHOTS}-shot train scores: {hi_scores}, test scores: {hi_test_scores}")
 
-    exact_array, _, _ = evaluate_array()
-    exact_score = score(exact_array)
-    print(f"Exact-expectation score of the winning params: {exact_score}")
+    exact_array = network_array()
+    exact_score, exact_threshold = score_train(exact_array)
+    exact_test_score = score_test(exact_array, exact_threshold)
+    print(f"Exact-expectation score of the winning params: "
+          f"train={exact_score}, test={exact_test_score}")
 
-    return honest_scores, HI_SHOTS, hi_grids, hi_scores, exact_array, exact_score
+    return (honest_scores, honest_test_scores, HI_SHOTS, hi_grids, hi_scores,
+            hi_test_scores, exact_array, exact_score, exact_test_score)
 
 
 def plot_trap_escape(chain0_history, chain0_T0, chain1_history, chain1_T0,
@@ -183,8 +182,6 @@ def plot_trap_escape(chain0_history, chain0_T0, chain1_history, chain1_T0,
             label=f'same warm start, near-greedy (T0={chain0_T0})')
     ax.plot(chain1_history, color='steelblue', linewidth=1.5,
             label=f'same warm start, real MH (T0={chain1_T0})')
-    ax.axhline(DOCUMENTED_GREEDY_TRAP_SCORE, color='crimson', linestyle='--',
-               label=f'documented greedy trap ({DOCUMENTED_GREEDY_TRAP_SCORE} mismatches)')
     ax.set_xlabel('Trial')
     ax.set_ylabel('Mismatch count (current state)')
     ax.set_title('Same warm start, different temperature:\n'
@@ -230,25 +227,26 @@ if __name__ == "__main__":
         print(f"\nSame-start temperature comparison: chain 0 (T0={results[0]['T0']}) "
               f"ended at {results[0]['final_score']} (best {results[0]['best_score']}); "
               f"chain 1 (T0={results[1]['T0']}) ended at {results[1]['final_score']} "
-              f"(best {results[1]['best_score']}); documented greedy trap = "
-              f"{DOCUMENTED_GREEDY_TRAP_SCORE}")
+              f"(best {results[1]['best_score']})")
         plot_trap_escape(results[0]["history"], results[0]["T0"],
                           results[1]["history"], results[1]["T0"])
 
-    honest_scores, hi_shots, hi_grids, hi_scores, exact_array, exact_score = honest_validation(
-        best["best_params"])
+    (honest_scores, honest_test_scores, hi_shots, hi_grids, hi_scores, hi_test_scores,
+     exact_array, exact_score, exact_test_score) = honest_validation(best["best_params"])
 
     np.savez("results/mh_shotbased.npz",
              params_old=best["best_params"], locked_in_score=best["best_score"],
-             honest_scores=honest_scores, hi_shots=hi_shots,
-             hi_grids=np.array(hi_grids), hi_scores=hi_scores,
-             exact_score=exact_score, exact_array=exact_array,
+             honest_scores=honest_scores, honest_test_scores=honest_test_scores,
+             hi_shots=hi_shots, hi_grids=np.array(hi_grids), hi_scores=hi_scores,
+             hi_test_scores=hi_test_scores,
+             exact_score=exact_score, exact_test_score=exact_test_score,
+             exact_array=exact_array, train_mask=train_mask, test_mask=test_mask,
              finals=[r["final_score"] for r in results], best_restart=best_chain_id,
              search_array=exact_array, phases20=phases20,
              history=chain_histories[best_chain_id])
 
     plot_result(exact_array, best["best_score"], hi_scores[0], chain_histories, best_chain_id,
-                fname="figures/mh_search.png")
+                fname="figures/mh_search.png", test_score=exact_test_score)
     plot_shotbased(np.mean(hi_grids, axis=0), hi_shots, hi_scores, best["best_score"],
                    honest_scores, exact_score, chain_histories, best_chain_id,
                    fname="figures/mh_shotbased.png")

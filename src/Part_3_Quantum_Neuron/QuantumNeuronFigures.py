@@ -1,79 +1,15 @@
-# Figures for the results-review meeting: (1) verification that the circuit's
-# measured expectation equals the reference analytic qneuron5 self.M (and where
-# its (1,1) term departs), (2) shot-budget readout cost of the best XOR model
-# found by the restart search. The reference formula is used only as a
-# verification reference here — the model itself is always the circuit.
+# Figures for the results-review meeting: shot-budget readout cost of the
+# best XOR model found by the restart search, run on the single entangled
+# 13-param circuit (figures/circuit_15param.png).
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 
 from QuantumNeuronMCMC import (
-    QNeuron5, reference_M, update_neuron_params, evaluate_array, score,
-    phases20, SHOTS,
+    update_neuron_params, network_array, score, phases20, SHOTS,
 )
 
 os.makedirs("figures", exist_ok=True)
-
-
-def fig_formula_verification(n_draws=300, seed=0):
-    rng = np.random.default_rng(seed)
-    circ_vals, ref_written, ref_additive = [], [], []
-    for _ in range(n_draws):
-        M1, M2 = rng.uniform(0, 1, 2)
-        w = rng.uniform(0, np.pi / 2, 5)
-        qn = QNeuron5(w)
-        circ_vals.append(qn.get_expectation(M1, M2))
-        ref_written.append(reference_M(M1, M2, *w))
-        ref_additive.append(reference_M(M1, M2, *w, additive_11=True))
-    circ_vals = np.array(circ_vals)
-    ref_written = np.array(ref_written)
-    ref_additive = np.array(ref_additive)
-
-    fig, axes = plt.subplots(1, 3, figsize=(19, 6))
-
-    for ax, ref, title in (
-        (axes[0], ref_written,
-         "Reference formula as written"),
-        (axes[1], ref_additive,
-         "With additive (1,1) term  sin²(2β1+2β2−δ)"),
-    ):
-        ax.scatter(ref, circ_vals, s=14, alpha=0.6, color='steelblue')
-        ax.plot([0, 1], [0, 1], color='grey', linestyle='--', linewidth=1)
-        max_err = np.max(np.abs(ref - circ_vals))
-        ax.set_xlabel('analytic  self.M')
-        ax.set_ylabel('circuit expectation (exact statevector)')
-        ax.set_title(f'{title}\nmax |ΔM| = {max_err:.2e}  ({n_draws} random draws)')
-        ax.set_aspect('equal')
-
-    # branch coefficients vs delta: controls forced to |a>|b>, input weights 0
-    b1, b2 = rng.uniform(0, np.pi / 2, 2)
-    deltas = np.linspace(0, np.pi / 2, 100)
-    ref_branch = {
-        (0, 0): lambda d: np.sin(d)**2,
-        (1, 0): lambda d: np.sin(2 * b1 - d)**2,
-        (0, 1): lambda d: np.sin(2 * b2 - d)**2,
-        (1, 1): lambda d: np.sin(2 * b1 - 2 * b2 + d)**2,
-    }
-    colors = {(0, 0): 'tab:blue', (1, 0): 'tab:green',
-              (0, 1): 'tab:orange', (1, 1): 'tab:red'}
-    ax = axes[2]
-    for (a, b), f in ref_branch.items():
-        circ_curve = [QNeuron5([0, 0, b1, b2, d]).get_expectation(a, b)
-                      for d in deltas]
-        ax.plot(deltas, circ_curve, color=colors[(a, b)], linewidth=2,
-                label=f'circuit, controls |{a}{b}⟩')
-        ax.plot(deltas, f(deltas), color=colors[(a, b)], linestyle='--',
-                linewidth=1.5, label=f'formula ({a},{b}) term')
-    ax.set_xlabel('δ')
-    ax.set_ylabel('P(1) of target qubit')
-    ax.set_title(f'Control-branch coefficients (β1={b1:.2f}, β2={b2:.2f})\n'
-                 'solid = circuit, dashed = reference formula; only (1,1) separates')
-    ax.legend(fontsize=8)
-
-    plt.tight_layout()
-    plt.savefig('figures/formula_verification.png', dpi=150,
-                bbox_inches='tight')
-    print("Saved → figures/formula_verification.png")
 
 
 def fig_shot_budget(budgets=(256, 1024, 4096, 16384), n_repeats=3):
@@ -87,7 +23,7 @@ def fig_shot_budget(budgets=(256, 1024, 4096, 16384), n_repeats=3):
     for b in budgets:
         scores[b] = []
         for r in range(n_repeats):
-            sa, _, _ = evaluate_array(shots=b)
+            sa = network_array(shots=b)
             scores[b].append(score(sa))
         print(f"shots={b}: scores {scores[b]}")
 
@@ -161,7 +97,7 @@ def fig_best_model_measured(hi_shots=16384, n_repeats=3):
 
     grids, scores = [], []
     for _ in range(n_repeats):
-        arr, _, _ = evaluate_array(shots=hi_shots)
+        arr = network_array(shots=hi_shots)
         grids.append(arr)
         scores.append(score(arr))
     print(f"best model, {hi_shots}-shot measured scores: {scores} "
@@ -175,7 +111,6 @@ def fig_best_model_measured(hi_shots=16384, n_repeats=3):
 
 
 if __name__ == "__main__":
-    fig_formula_verification()
     fig_shot_budget()
     fig_survey_style_maps()
     fig_best_model_measured()

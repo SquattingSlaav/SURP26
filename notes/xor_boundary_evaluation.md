@@ -322,3 +322,89 @@ plus earlier scripts):
       Qiskit `rz(π)`, the repo has been using `rz(π/2)` everywhere; (b) his
       qneuron5 (1,1) term looks like an algebra slip — circuit-realizable form
       is `sin²(2β1+2β2−δ)`.
+
+## Reverted to single-circuit entangled composition (2026-07-08)
+
+Professor feedback: the 13-param network should be built at once, in one
+function, matching `figures/circuit_15param.png` — not as three separately
+measured circuits with the middle layer's output fed forward as a classical
+rotation angle. That measured-feedforward composition (`QNeuron5`×2 →
+`QNeuron3b`, matching Shing Chi's snippet) is what `QuantumNeuronMCMC.py` had
+been using, along with its `2*theta`/`rz(pi)` angle convention (needed only to
+match Shing Chi's analytic formula bit-for-bit).
+
+Dropped both: `QuantumNeuronMCMC.py` now builds a `QNeuron13` circuit from
+`QuantumNeuron15Param.build_15param_network` (added a `measure=True/False`
+flag so the same function serves both the exact-statevector and shot-based
+paths) — one 6-qubit circuit, one measurement, plain angles, `rz(pi/2)`. This
+is the same circuit `QuantumNeuron15Param.py`'s original 900-model survey used
+to generate `circuit_15param.png`. `QuantumNeuronMH.py`, `QuantumNeuronFigures.py`,
+and `QuantumNeuronShapeGallery.py` all import through this single builder now.
+
+Consequences:
+- `reference_M`/`verify_against_reference_formula` and
+  `figures/formula_verification.png` are gone — they verified the old
+  convention specifically, which no longer exists in this code path.
+- The old measured-feedforward per-neuron caching optimization (skip
+  recomputing a hidden neuron's grid if its params didn't change) no longer
+  applies — one circuit means every trial recomputes the full 20×20 grid.
+  Net effect is still fewer circuit executions per trial (one `sim.run` batch
+  instead of up to three).
+- `phases20`/input range changed from a probability sweep (`0` to `0.95`) to
+  `linspace(0, pi/2, 20)` raw angles, matching `QuantumNeuron15Param.py`'s own
+  survey axis and CLAUDE.md's documented survey convention.
+- `results/mcmc_search.npz`, `results/mcmc_shotbased.npz`, `results/mh_*.npz`,
+  and the shape-gallery results were all produced under the old architecture
+  and are stale; re-running `QuantumNeuronMCMC.py` → `QuantumNeuronMH.py` →
+  `QuantumNeuronShapeGallery.py` → `QuantumNeuronFigures.py` regenerates them
+  under the new circuit.
+
+## Added a held-out test split to the search (2026-07-08)
+
+Further professor feedback: the search needs actual train/test sets, not just
+scoring on the same grid it was fit to. `QuantumNeuronMCMC.py` now holds out
+20% of each XOR quadrant (`TEST_FRACTION`, seeded via `SPLIT_SEED`) as
+`test_mask`, disjoint from `train_mask` — 320 train points / 80 test points
+out of the 400-point 20×20 grid.
+
+- `score_train(array)` fits the decision threshold `(max+min)/2` from
+  `train_mask` points only and returns `(mismatches, threshold)`.
+- `score_test(array, threshold)` applies an already-fit threshold to
+  `test_mask` points and never refits — this is the only honest
+  generalization check.
+- `run_mcmc`/`run_mh_chain` (the actual search/acceptance loops) score
+  exclusively via `score_train`; `test_mask` points never influence which
+  model is accepted.
+- After a search locks in a winner, both scripts report and save a held-out
+  test score (exact-statevector, `SHOTS`-shot, and `HI_SHOTS`-shot), always
+  reusing the threshold fit on that same realization's train points.
+- The old full-grid `score(array)` function (400/400, no split) is kept for
+  `QuantumNeuronShapeGallery.py`/`QuantumNeuronFigures.py`, which are
+  presentation/exploration tools downstream of a locked-in model, not part of
+  the search decision itself.
+- `QuantumNeuronMH.py`'s `DOCUMENTED_GREEDY_TRAP_SCORE = 141` reference line
+  was measured under the old feedforward architecture on the full 400-point
+  grid; removed as no longer comparable (different circuit, different
+  denominator). The chain-0-vs-chain-1 same-start A/B comparison still works
+  without it — it's judged against each other, not an external constant.
+
+Re-run pending: `QuantumNeuronMCMC.py` → `QuantumNeuronMH.py` →
+`QuantumNeuronShapeGallery.py` → `QuantumNeuronFigures.py`.
+
+### Split mechanism switched to sklearn (2026-07-08)
+
+`_make_split()` now builds the train/test split with
+`sklearn.model_selection.train_test_split`, stratified by a per-cell
+quadrant label, instead of the earlier hand-rolled `np.random.default_rng`
+sampler. Same behavior — 320/80 split, exactly 20 held-out test points per
+quadrant — just built with sklearn's stratified splitter instead of a manual
+per-block `rng.choice`. `scikit-learn` was added as a project dependency.
+
+A reduced-scale sanity check (3 restarts × 500 trials MCMC; 3 chains × 800
+trials MH) validated the new architecture before this switch: MH's annealed
+search found train=0/320, test=0/80 mismatches (exact statevector) — a
+genuine XOR checkerboard with held-out generalization — while MCMC's
+shot-based greedy search got stuck at train=85/320, test=28/80, consistent
+with prior findings that greedy search under shot noise stalls early. Full-
+scale run (5 restarts × 3000 trials MCMC; 5 chains × 5000 trials MH) now in
+progress with the sklearn-based split.

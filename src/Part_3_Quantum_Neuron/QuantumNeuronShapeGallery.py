@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import os
 
 from QuantumNeuronMCMC import (
-    phases20, p_ref, update_neuron_params, evaluate_array, score, SHOTS,
+    phases20, p_ref, update_neuron_params, network_array, score, SHOTS,
 )
 
 os.makedirs("results", exist_ok=True)
@@ -195,11 +195,11 @@ def shot_measure_gallery(gallery_params, shots=SHOTS, hi_shots=HI_SHOTS,
         params = [int(v) for v in p]
         update_neuron_params(params)
         for r in range(n_shot_repeats):
-            arr, _, _ = evaluate_array(shots=shots)
+            arr = network_array(shots=shots)
             shot_arrays[k, r] = arr
             shot_scores[k, r] = score(arr)
         for r in range(n_hi_repeats):
-            arr, _, _ = evaluate_array(shots=hi_shots)
+            arr = network_array(shots=hi_shots)
             hi_arrays[k, r] = arr
             hi_scores[k, r] = score(arr)
         print(f"  model {k}: {shots}-shot scores={list(shot_scores[k])}  "

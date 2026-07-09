@@ -11,15 +11,18 @@ os.makedirs("figures", exist_ok=True)
 
 sim = AerSimulator()
 
-def build_15param_network(alpha, beta, p):
+def build_15param_network(alpha, beta, p, measure=True):
     q0 = QuantumRegister(1, 'qreg_0')
     q1 = QuantumRegister(1, 'qreg_1')
     q2 = QuantumRegister(1, 'qreg_2')
     q3 = QuantumRegister(1, 'qreg_3')
     q4 = QuantumRegister(1, 'qreg_4')
     q5 = QuantumRegister(1, 'qreg_5')
-    cr = ClassicalRegister(1, 'creg')
-    qc = QuantumCircuit(q0, q1, q2, q3, q4, q5, cr)
+    regs = [q0, q1, q2, q3, q4, q5]
+    if measure:
+        cr = ClassicalRegister(1, 'creg')
+        regs.append(cr)
+    qc = QuantumCircuit(*regs)
 
     # neuron 1: q0, q1 -> q2 (params 0-4)
     qc.ry(alpha, q0)
@@ -52,7 +55,8 @@ def build_15param_network(alpha, beta, p):
     qc.cry(-p[11], q2, q5)
     qc.ry(p[12], q5)
 
-    qc.measure(q5, cr)
+    if measure:
+        qc.measure(q5, cr)
     return qc
 
 def run_circuit(qc):
