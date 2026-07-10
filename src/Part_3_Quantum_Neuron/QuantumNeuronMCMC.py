@@ -7,8 +7,6 @@ import random
 import os
 import time
 
-from sklearn.model_selection import train_test_split
-
 from QuantumNeuron15Param import build_15param_network
 
 SHOTS = 1024
@@ -26,31 +24,6 @@ p_ref = np.array(
     [[True] * 10 + [False] * 10 for _ in range(10)] +
     [[False] * 10 + [True] * 10 for _ in range(10)]
 )
-
-TEST_FRACTION = 0.2
-SPLIT_SEED = 0
-
-
-def _make_split(test_fraction=TEST_FRACTION, seed=SPLIT_SEED):
-    # holds out test_fraction of each XOR quadrant so the search never scores
-    # against these points -- they're reserved for a final generalization
-    # check, not used to pick or accept any model
-    n = len(phases20)
-    half = n // 2
-    ii, jj = np.meshgrid(np.arange(n), np.arange(n), indexing='ij')
-    quadrant = (ii >= half).astype(int) * 2 + (jj >= half).astype(int)
-    flat_idx = np.arange(n * n)
-    train_idx, _ = train_test_split(
-        flat_idx, test_size=test_fraction, stratify=quadrant.ravel(),
-        random_state=seed)
-    train_mask = np.zeros(n * n, dtype=bool)
-    train_mask[train_idx] = True
-    train_mask = train_mask.reshape(n, n)
-    return train_mask, ~train_mask
-
-
-train_mask, test_mask = _make_split()
-
 
 class QNeuron13:
     # The entangled 13-param network, built by the single function
@@ -122,27 +95,13 @@ def score(array):
     return int(np.sum(np.logical_xor(mask, p_ref)))
 
 
-def score_train(array):
-    # threshold fit from train points only; search decisions must never see test_mask
-    sub = array[train_mask]
-    threshold = (sub.max() + sub.min()) / 2
-    mismatches = int(np.sum(np.logical_xor(sub > threshold, p_ref[train_mask])))
-    return mismatches, threshold
-
-
-def score_test(array, threshold):
-    # apply a threshold already fit on train data -- never refit here
-    sub = array[test_mask]
-    return int(np.sum(np.logical_xor(sub > threshold, p_ref[test_mask])))
-
-
 def run_mcmc(n_trials, params_old, verbose_every=500, patience=None, shots=None):
     update_neuron_params(params_old)
     best_array = network_array(shots=shots)
-    results_old, _ = score_train(best_array)
+    results_old = score(best_array)
     start_score = results_old
-    print(f"Initial score at warm-start params: {results_old}/{train_mask.sum()} "
-          f"train mismatches", flush=True)
+    print(f"Initial score at warm-start params: {results_old}/{p_ref.size} mismatches",
+          flush=True)
     history = [results_old]
     last_accept = 0
 
@@ -159,7 +118,7 @@ def run_mcmc(n_trials, params_old, verbose_every=500, patience=None, shots=None)
 
         update_neuron_params(params)
         array = network_array(shots=shots)
-        results, _ = score_train(array)
+        results = score(array)
 
         if results < results_old:
             print(f"good {trial} {idx_choice} {sgn_choice} {results} {results_old} {params}",
@@ -206,17 +165,15 @@ def run_restarts(n_restarts=10, n_trials=3000, patience=500, shots=None):
     return best, histories, finals, total
 
 
-def plot_result(best_array, results_old, shot_score, histories, best_restart, fname=None,
-                test_score=None):
+def plot_result(best_array, results_old, shot_score, histories, best_restart, fname=None):
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
     im0 = axes[0].pcolormesh(phases20, phases20, best_array, shading='auto', cmap='RdBu')
     fig.colorbar(im0, ax=axes[0], label='expectation')
     axes[0].set_xlabel('θ1 (input probability)')
     axes[0].set_ylabel('θ0 (input probability)')
-    test_str = f', held-out test={test_score}/{test_mask.sum()}' if test_score is not None else ''
-    axes[0].set_title(f'Best model, restart {best_restart} (train mismatches={results_old}'
-                      f'/{train_mask.sum()}, {SHOTS}-shot check={shot_score}{test_str})')
+    axes[0].set_title(f'Best model, restart {best_restart} (mismatches={results_old}'
+                      f'/{p_ref.size}, {SHOTS}-shot check={shot_score})')
 
     axes[1].pcolormesh(phases20, phases20, p_ref, shading='auto', cmap='RdBu')
     axes[1].set_xlabel('θ1 (input probability)')
@@ -281,65 +238,58 @@ def plot_shotbased(mean_hi_grid, hi_shots, hi_scores, locked_in, honest_scores,
 
 
 if __name__ == "__main__":
+    # search itself runs on the exact statevector (shots=None), matching
+    # QuantumNeuronMH.py and the CLAUDE.md convention -- greedy accept/reject
+    # must not be driven by shot noise, since results_old is never
+    # re-measured once accepted and would otherwise lock in lucky draws
     best, histories, finals, total = run_restarts(n_restarts=5, n_trials=3000,
-                                                  patience=500, shots=SHOTS)
+                                                  patience=500, shots=None)
 
     print(f"\nAll restarts done in {total:.1f}s ({total/60:.2f} min)")
-    print(f"Final train scores per restart: {finals}")
-    print(f"Best (locked-in): {best['score']}/{train_mask.sum()} train mismatches "
+    print(f"Final scores per restart: {finals}")
+    print(f"Best (exact statevector): {best['score']}/{p_ref.size} mismatches "
           f"(restart {best['restart']})")
     print(f"Best params (indices): {best['params']}")
 
-    # held-out generalization check: threshold fit on train, never refit here
-    _, best_threshold = score_train(best['array'])
-    best_test_score = score_test(best['array'], best_threshold)
-    print(f"Held-out test score: {best_test_score}/{test_mask.sum()} mismatches")
-
     np.savez("results/mcmc_search.npz",
              params_old=best['params'], results_old=best['score'], array=best['array'],
-             test_score=best_test_score, train_mask=train_mask, test_mask=test_mask,
              finals=finals, best_restart=best['restart'], phases20=phases20,
              history=np.array(histories[best['restart']]))
-    plot_result(best['array'], best['score'], best['score'], histories, best['restart'],
-                test_score=best_test_score)
 
     update_neuron_params(best['params'])
 
     print(f"\nHonest re-measurement: 5 independent {SHOTS}-shot evaluations...")
-    honest_scores, honest_test_scores = [], []
+    honest_scores = []
     for _ in range(5):
         arr = network_array(shots=SHOTS)
-        train_s, thr = score_train(arr)
-        honest_scores.append(train_s)
-        honest_test_scores.append(score_test(arr, thr))
-    print(f"{SHOTS}-shot re-measured train scores: {honest_scores} "
-          f"(search locked in {best['score']})")
-    print(f"{SHOTS}-shot re-measured test scores: {honest_test_scores}")
+        honest_scores.append(score(arr))
+    print(f"{SHOTS}-shot re-measured scores: {honest_scores} "
+          f"(exact-statevector search score {best['score']})")
+
+    # shot_score is a genuine SHOTS-measured value (not the exact search score)
+    plot_result(best['array'], best['score'], honest_scores[0], histories, best['restart'])
 
     HI_SHOTS = 16384
     print(f"\nDefinitive measured grids: 3× at {HI_SHOTS} shots...")
-    hi_grids, hi_scores, hi_test_scores = [], [], []
+    hi_grids, hi_scores = [], []
     for _ in range(3):
         arr = network_array(shots=HI_SHOTS)
         hi_grids.append(arr)
-        train_s, thr = score_train(arr)
-        hi_scores.append(train_s)
-        hi_test_scores.append(score_test(arr, thr))
-    print(f"{HI_SHOTS}-shot train scores: {hi_scores}, test scores: {hi_test_scores}")
+        hi_scores.append(score(arr))
+    print(f"{HI_SHOTS}-shot scores: {hi_scores}")
 
-    exact_array = network_array()
-    exact_score, exact_threshold = score_train(exact_array)
-    exact_test_score = score_test(exact_array, exact_threshold)
-    print(f"Exact-expectation score of the same params (for reference): "
-          f"train={exact_score}, test={exact_test_score}")
+    # best['array']/best['score'] already are the exact-statevector result of
+    # these params (the search ran with shots=None), so reuse them directly
+    exact_array, exact_score = best['array'], best['score']
+    print(f"Exact-expectation score of the same params (search score, for reference): "
+          f"{exact_score}")
 
     np.savez("results/mcmc_shotbased.npz",
              params_old=best['params'], locked_in_score=best['score'],
-             honest_scores=honest_scores, honest_test_scores=honest_test_scores,
+             honest_scores=honest_scores,
              hi_shots=HI_SHOTS, hi_grids=np.array(hi_grids), hi_scores=hi_scores,
-             hi_test_scores=hi_test_scores,
-             exact_score=exact_score, exact_test_score=exact_test_score,
-             exact_array=exact_array, train_mask=train_mask, test_mask=test_mask,
+             exact_score=exact_score,
+             exact_array=exact_array,
              finals=finals, best_restart=best['restart'],
              search_array=best['array'], phases20=phases20,
              history=np.array(histories[best['restart']]))

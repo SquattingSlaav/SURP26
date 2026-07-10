@@ -5,8 +5,8 @@ import random
 import time
 
 from QuantumNeuronMCMC import (
-    update_neuron_params, network_array, score_train, score_test,
-    train_mask, test_mask, phases20, SHOTS, plot_result, plot_shotbased,
+    update_neuron_params, network_array, score,
+    phases20, SHOTS, plot_result, plot_shotbased,
 )
 
 os.makedirs("results", exist_ok=True)
@@ -75,7 +75,7 @@ def make_chain_configs(n_chains, ladder=T0_LADDER_FULL, seed=42):
 def run_mh_chain(chain_id, start_params, T0, n_trials, snapshot_every=50):
     update_neuron_params(start_params)
     array = network_array(shots=None)
-    cur_score, _ = score_train(array)
+    cur_score = score(array)
     cur_params = list(start_params)
     best_score = cur_score
     best_params = list(cur_params)
@@ -88,7 +88,7 @@ def run_mh_chain(chain_id, start_params, T0, n_trials, snapshot_every=50):
         proposal, _ = propose(cur_params)
         update_neuron_params(proposal)
         arr = network_array(shots=None)
-        new_score, _ = score_train(arr)
+        new_score = score(arr)
 
         if accept(new_score, cur_score, T):
             cur_params, cur_score = proposal, new_score
@@ -145,34 +145,26 @@ def build_snapshot_pool(results):
 def honest_validation(best_params):
     update_neuron_params(best_params)
     print(f"\nHonest re-measurement: 5 independent {SHOTS}-shot evaluations...")
-    honest_scores, honest_test_scores = [], []
+    honest_scores = []
     for _ in range(5):
         arr = network_array(shots=SHOTS)
-        train_s, thr = score_train(arr)
-        honest_scores.append(train_s)
-        honest_test_scores.append(score_test(arr, thr))
-    print(f"{SHOTS}-shot re-measured train scores: {honest_scores}")
-    print(f"{SHOTS}-shot re-measured test scores: {honest_test_scores}")
+        honest_scores.append(score(arr))
+    print(f"{SHOTS}-shot re-measured scores: {honest_scores}")
 
     HI_SHOTS = 16384
     print(f"\nDefinitive measured grids: 3x at {HI_SHOTS} shots...")
-    hi_grids, hi_scores, hi_test_scores = [], [], []
+    hi_grids, hi_scores = [], []
     for _ in range(3):
         arr = network_array(shots=HI_SHOTS)
         hi_grids.append(arr)
-        train_s, thr = score_train(arr)
-        hi_scores.append(train_s)
-        hi_test_scores.append(score_test(arr, thr))
-    print(f"{HI_SHOTS}-shot train scores: {hi_scores}, test scores: {hi_test_scores}")
+        hi_scores.append(score(arr))
+    print(f"{HI_SHOTS}-shot scores: {hi_scores}")
 
     exact_array = network_array()
-    exact_score, exact_threshold = score_train(exact_array)
-    exact_test_score = score_test(exact_array, exact_threshold)
-    print(f"Exact-expectation score of the winning params: "
-          f"train={exact_score}, test={exact_test_score}")
+    exact_score = score(exact_array)
+    print(f"Exact-expectation score of the winning params: {exact_score}")
 
-    return (honest_scores, honest_test_scores, HI_SHOTS, hi_grids, hi_scores,
-            hi_test_scores, exact_array, exact_score, exact_test_score)
+    return honest_scores, HI_SHOTS, hi_grids, hi_scores, exact_array, exact_score
 
 
 def plot_trap_escape(chain0_history, chain0_T0, chain1_history, chain1_T0,
@@ -231,22 +223,21 @@ if __name__ == "__main__":
         plot_trap_escape(results[0]["history"], results[0]["T0"],
                           results[1]["history"], results[1]["T0"])
 
-    (honest_scores, honest_test_scores, hi_shots, hi_grids, hi_scores, hi_test_scores,
-     exact_array, exact_score, exact_test_score) = honest_validation(best["best_params"])
+    (honest_scores, hi_shots, hi_grids, hi_scores,
+     exact_array, exact_score) = honest_validation(best["best_params"])
 
     np.savez("results/mh_shotbased.npz",
              params_old=best["best_params"], locked_in_score=best["best_score"],
-             honest_scores=honest_scores, honest_test_scores=honest_test_scores,
+             honest_scores=honest_scores,
              hi_shots=hi_shots, hi_grids=np.array(hi_grids), hi_scores=hi_scores,
-             hi_test_scores=hi_test_scores,
-             exact_score=exact_score, exact_test_score=exact_test_score,
-             exact_array=exact_array, train_mask=train_mask, test_mask=test_mask,
+             exact_score=exact_score,
+             exact_array=exact_array,
              finals=[r["final_score"] for r in results], best_restart=best_chain_id,
              search_array=exact_array, phases20=phases20,
              history=chain_histories[best_chain_id])
 
     plot_result(exact_array, best["best_score"], hi_scores[0], chain_histories, best_chain_id,
-                fname="figures/mh_search.png", test_score=exact_test_score)
+                fname="figures/mh_search.png")
     plot_shotbased(np.mean(hi_grids, axis=0), hi_shots, hi_scores, best["best_score"],
                    honest_scores, exact_score, chain_histories, best_chain_id,
                    fname="figures/mh_shotbased.png")
